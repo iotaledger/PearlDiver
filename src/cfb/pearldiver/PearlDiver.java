@@ -5,20 +5,22 @@ package cfb.pearldiver;
  */
 public class PearlDiver {
 
-    private static final int TRANSACTION_LENGTH = 8019;
+    public static final int TRANSACTION_LENGTH = 8019;
+
     private static final int HASH_LENGTH = 243;
     private static final int STATE_LENGTH = HASH_LENGTH * 3;
 
-    private boolean interrupted;
+    private boolean finished, interrupted;
 
     public synchronized void interrupt() {
 
+        finished = true;
         interrupted = true;
 
-        notify();
+        notifyAll();
     }
 
-    public synchronized void search(final int[] transactionTrits, final int minWeightMagnitude, int numberOfThreads) {
+    public synchronized boolean search(final int[] transactionTrits, final int minWeightMagnitude, int numberOfThreads) {
 
         if (transactionTrits.length != TRANSACTION_LENGTH) {
 
@@ -29,6 +31,7 @@ public class PearlDiver {
             throw new RuntimeException("Invalid min weight magnitude: " + minWeightMagnitude);
         }
 
+        finished = false;
         interrupted = false;
 
         final long[] midStateLow = new long[STATE_LENGTH], midStateHigh = new long[STATE_LENGTH];
@@ -107,7 +110,7 @@ public class PearlDiver {
 
                 final long[] stateLow = new long[STATE_LENGTH], stateHigh = new long[STATE_LENGTH];
                 final long[] scratchpadLow = new long[STATE_LENGTH], scratchpadHigh = new long[STATE_LENGTH];
-                while (!interrupted) {
+                while (!finished) {
 
                     increment(midStateCopyLow, midStateCopyHigh, (HASH_LENGTH / 3) * 2, HASH_LENGTH);
                     System.arraycopy(midStateCopyLow, 0, stateLow, 0, STATE_LENGTH);
@@ -125,7 +128,7 @@ public class PearlDiver {
                             }
                         }
 
-                        interrupted = true;
+                        finished = true;
 
                         synchronized (this) {
 
@@ -150,6 +153,8 @@ public class PearlDiver {
 
         } catch (final InterruptedException e) {
         }
+
+        return interrupted;
     }
 
     private static void transform(final long[] stateLow, final long[] stateHigh, final long[] scratchpadLow, final long[] scratchpadHigh) {
@@ -165,10 +170,10 @@ public class PearlDiver {
                 final long alpha = scratchpadLow[scratchpadIndex];
                 final long beta = scratchpadHigh[scratchpadIndex];
                 final long gamma = scratchpadHigh[scratchpadIndex += (scratchpadIndex < 365 ? 364 : -365)];
-                final long delta = (scratchpadLow[scratchpadIndex] ^ beta) & ((~gamma) | alpha);
+                final long delta = (alpha | (~gamma)) & (scratchpadLow[scratchpadIndex] ^ beta);
 
                 stateLow[stateIndex] = ~delta;
-                stateHigh[stateIndex] = delta | (gamma ^ alpha);
+                stateHigh[stateIndex] = (alpha ^ gamma) | delta;
             }
         }
     }
