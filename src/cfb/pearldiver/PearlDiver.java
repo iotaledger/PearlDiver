@@ -7,15 +7,18 @@ public class PearlDiver {
 
     public static final int TRANSACTION_LENGTH = 8019;
 
-    private static final int HASH_LENGTH = 243;
-    private static final int STATE_LENGTH = HASH_LENGTH * 3;
+    private static final int CURL_HASH_LENGTH = 243;
+    private static final int CURL_STATE_LENGTH = CURL_HASH_LENGTH * 3;
 
-    private boolean finished, interrupted;
+    private static final int RUNNING = 0;
+    private static final int CANCELLED = 1;
+    private static final int COMPLETED = 2;
 
-    public synchronized void interrupt() {
+    private volatile int state;
 
-        finished = true;
-        interrupted = true;
+    public synchronized void cancel() {
+
+        state = CANCELLED;
 
         notifyAll();
     }
@@ -26,64 +29,63 @@ public class PearlDiver {
 
             throw new RuntimeException("Invalid transaction trits length: " + transactionTrits.length);
         }
-        if (minWeightMagnitude < 0 || minWeightMagnitude > HASH_LENGTH) {
+        if (minWeightMagnitude < 0 || minWeightMagnitude > CURL_HASH_LENGTH) {
 
             throw new RuntimeException("Invalid min weight magnitude: " + minWeightMagnitude);
         }
 
-        finished = false;
-        interrupted = false;
+        state = RUNNING;
 
-        final long[] midStateLow = new long[STATE_LENGTH], midStateHigh = new long[STATE_LENGTH];
+        final long[] midCurlStateLow = new long[CURL_STATE_LENGTH], midCurlStateHigh = new long[CURL_STATE_LENGTH];
 
         {
-            for (int i = HASH_LENGTH; i < STATE_LENGTH; i++) {
+            for (int i = CURL_HASH_LENGTH; i < CURL_STATE_LENGTH; i++) {
 
-                midStateLow[i] = 0b1111111111111111111111111111111111111111111111111111111111111111L;
-                midStateHigh[i] = 0b1111111111111111111111111111111111111111111111111111111111111111L;
+                midCurlStateLow[i] = 0b1111111111111111111111111111111111111111111111111111111111111111L;
+                midCurlStateHigh[i] = 0b1111111111111111111111111111111111111111111111111111111111111111L;
             }
 
             int offset = 0;
-            final long[] scratchpadLow = new long[STATE_LENGTH], scratchpadHigh = new long[STATE_LENGTH];
-            for (int i = (TRANSACTION_LENGTH - HASH_LENGTH) / HASH_LENGTH; i-- > 0; ) {
+            final long[] curlScratchpadLow = new long[CURL_STATE_LENGTH], curlScratchpadHigh = new long[CURL_STATE_LENGTH];
+            for (int i = (TRANSACTION_LENGTH - CURL_HASH_LENGTH) / CURL_HASH_LENGTH; i-- > 0; ) {
 
-                for (int j = 0; j < HASH_LENGTH; j++) {
+                for (int j = 0; j < CURL_HASH_LENGTH; j++) {
 
                     switch (transactionTrits[offset++]) {
 
                         case 0: {
 
-                            midStateLow[j] = 0b1111111111111111111111111111111111111111111111111111111111111111L;
-                            midStateHigh[j] = 0b1111111111111111111111111111111111111111111111111111111111111111L;
+                            midCurlStateLow[j] = 0b1111111111111111111111111111111111111111111111111111111111111111L;
+                            midCurlStateHigh[j] = 0b1111111111111111111111111111111111111111111111111111111111111111L;
 
                         } break;
 
                         case 1: {
 
-                            midStateLow[j] = 0b0000000000000000000000000000000000000000000000000000000000000000L;
-                            midStateHigh[j] = 0b1111111111111111111111111111111111111111111111111111111111111111L;
+                            midCurlStateLow[j] = 0b0000000000000000000000000000000000000000000000000000000000000000L;
+                            midCurlStateHigh[j] = 0b1111111111111111111111111111111111111111111111111111111111111111L;
 
                         } break;
 
                         default: {
 
-                            midStateLow[j] = 0b1111111111111111111111111111111111111111111111111111111111111111L;
-                            midStateHigh[j] = 0b0000000000000000000000000000000000000000000000000000000000000000L;
+                            midCurlStateLow[j] = 0b1111111111111111111111111111111111111111111111111111111111111111L;
+                            midCurlStateHigh[j] = 0b0000000000000000000000000000000000000000000000000000000000000000L;
                         }
                     }
                 }
 
-                transform(midStateLow, midStateHigh, scratchpadLow, scratchpadHigh);
+                transform(midCurlStateLow, midCurlStateHigh, curlScratchpadLow, curlScratchpadHigh);
             }
 
-            midStateLow[0] = 0b1101101101101101101101101101101101101101101101101101101101101101L;
-            midStateHigh[0] = 0b1011011011011011011011011011011011011011011011011011011011011011L;
-            midStateLow[1] = 0b1111000111111000111111000111111000111111000111111000111111000111L;
-            midStateHigh[1] = 0b1000111111000111111000111111000111111000111111000111111000111111L;
-            midStateLow[2] = 0b0111111111111111111000000000111111111111111111000000000111111111L;
-            midStateHigh[2] = 0b1111111111000000000111111111111111111000000000111111111111111111L;
-            midStateLow[3] = 0b1111111111000000000000000000000000000111111111111111111111111111L;
-            midStateHigh[3] = 0b0000000000111111111111111111111111111111111111111111111111111111L;
+            midCurlStateLow[0] = 0b1101101101101101101101101101101101101101101101101101101101101101L;
+            midCurlStateHigh[0] = 0b1011011011011011011011011011011011011011011011011011011011011011L;
+            midCurlStateLow[1] = 0b1111000111111000111111000111111000111111000111111000111111000111L;
+            midCurlStateHigh[1] = 0b1000111111000111111000111111000111111000111111000111111000111111L;
+            midCurlStateLow[2] = 0b0111111111111111111000000000111111111111111111000000000111111111L;
+            midCurlStateHigh[2] = 0b1111111111000000000111111111111111111000000000111111111111111111L;
+            midCurlStateLow[3] = 0b1111111111000000000000000000000000000111111111111111111111111111L;
+            midCurlStateHigh[3] = 0b0000000000111111111111111111111111111111111111111111111111111111L;
         }
 
         if (numberOfThreads <= 0) {
@@ -100,44 +102,47 @@ public class PearlDiver {
             final int threadIndex = numberOfThreads;
             (new Thread(() -> {
 
-                final long[] midStateCopyLow = new long[STATE_LENGTH], midStateCopyHigh = new long[STATE_LENGTH];
-                System.arraycopy(midStateLow, 0, midStateCopyLow, 0, STATE_LENGTH);
-                System.arraycopy(midStateHigh, 0, midStateCopyHigh, 0, STATE_LENGTH);
+                final long[] midCurlStateCopyLow = new long[CURL_STATE_LENGTH], midCurlStateCopyHigh = new long[CURL_STATE_LENGTH];
+                System.arraycopy(midCurlStateLow, 0, midCurlStateCopyLow, 0, CURL_STATE_LENGTH);
+                System.arraycopy(midCurlStateHigh, 0, midCurlStateCopyHigh, 0, CURL_STATE_LENGTH);
                 for (int i = threadIndex; i-- > 0; ) {
 
-                    increment(midStateCopyLow, midStateCopyHigh, HASH_LENGTH / 3, (HASH_LENGTH / 3) * 2);
+                    increment(midCurlStateCopyLow, midCurlStateCopyHigh, CURL_HASH_LENGTH / 3, (CURL_HASH_LENGTH / 3) * 2);
                 }
 
-                final long[] stateLow = new long[STATE_LENGTH], stateHigh = new long[STATE_LENGTH];
-                final long[] scratchpadLow = new long[STATE_LENGTH], scratchpadHigh = new long[STATE_LENGTH];
-                while (!finished) {
+                final long[] curlStateLow = new long[CURL_STATE_LENGTH], curlStateHigh = new long[CURL_STATE_LENGTH];
+                final long[] curlScratchpadLow = new long[CURL_STATE_LENGTH], curlScratchpadHigh = new long[CURL_STATE_LENGTH];
+                while (state == RUNNING) {
 
-                    increment(midStateCopyLow, midStateCopyHigh, (HASH_LENGTH / 3) * 2, HASH_LENGTH);
-                    System.arraycopy(midStateCopyLow, 0, stateLow, 0, STATE_LENGTH);
-                    System.arraycopy(midStateCopyHigh, 0, stateHigh, 0, STATE_LENGTH);
-                    transform(stateLow, stateHigh, scratchpadLow, scratchpadHigh);
+                    increment(midCurlStateCopyLow, midCurlStateCopyHigh, (CURL_HASH_LENGTH / 3) * 2, CURL_HASH_LENGTH);
+                    System.arraycopy(midCurlStateCopyLow, 0, curlStateLow, 0, CURL_STATE_LENGTH);
+                    System.arraycopy(midCurlStateCopyHigh, 0, curlStateHigh, 0, CURL_STATE_LENGTH);
+                    transform(curlStateLow, curlStateHigh, curlScratchpadLow, curlScratchpadHigh);
 
                 NEXT_BIT_INDEX:
                     for (int bitIndex = 64; bitIndex-- > 0; ) {
 
                         for (int i = minWeightMagnitude; i-- > 0; ) {
 
-                            if ((((int)(stateLow[HASH_LENGTH - 1 - i] >> bitIndex)) & 1) != (((int)(stateHigh[HASH_LENGTH - 1 - i] >> bitIndex)) & 1)) {
+                            if ((((int)(curlStateLow[CURL_HASH_LENGTH - 1 - i] >> bitIndex)) & 1) != (((int)(curlStateHigh[CURL_HASH_LENGTH - 1 - i] >> bitIndex)) & 1)) {
 
                                 continue NEXT_BIT_INDEX;
                             }
                         }
 
-                        finished = true;
-
                         synchronized (this) {
 
-                            for (int i = 0; i < HASH_LENGTH; i++) {
+                            if (state == RUNNING) {
 
-                                transactionTrits[TRANSACTION_LENGTH - HASH_LENGTH + i] = ((((int)(midStateCopyLow[i] >> bitIndex)) & 1) == 0) ? 1 : (((((int)(midStateCopyHigh[i] >> bitIndex)) & 1) == 0) ? -1 : 0);
+                                state = COMPLETED;
+
+                                for (int i = 0; i < CURL_HASH_LENGTH; i++) {
+
+                                    transactionTrits[TRANSACTION_LENGTH - CURL_HASH_LENGTH + i] = ((((int) (midCurlStateCopyLow[i] >> bitIndex)) & 1) == 0) ? 1 : (((((int) (midCurlStateCopyHigh[i] >> bitIndex)) & 1) == 0) ? -1 : 0);
+                                }
+
+                                notifyAll();
                             }
-
-                            notifyAll();
                         }
 
                         break;
@@ -149,53 +154,58 @@ public class PearlDiver {
 
         try {
 
-            wait();
+            while (state == RUNNING) {
+
+                wait();
+            }
 
         } catch (final InterruptedException e) {
+
+            state = CANCELLED;
         }
 
-        return interrupted;
+        return state == COMPLETED;
     }
 
-    private static void transform(final long[] stateLow, final long[] stateHigh, final long[] scratchpadLow, final long[] scratchpadHigh) {
+    private static void transform(final long[] curlStateLow, final long[] curlStateHigh, final long[] curlScratchpadLow, final long[] curlScratchpadHigh) {
 
-        int scratchpadIndex = 0;
+        int curlScratchpadIndex = 0;
         for (int round = 27; round-- > 0; ) {
 
-            System.arraycopy(stateLow, 0, scratchpadLow, 0, STATE_LENGTH);
-            System.arraycopy(stateHigh, 0, scratchpadHigh, 0, STATE_LENGTH);
+            System.arraycopy(curlStateLow, 0, curlScratchpadLow, 0, CURL_STATE_LENGTH);
+            System.arraycopy(curlStateHigh, 0, curlScratchpadHigh, 0, CURL_STATE_LENGTH);
 
-            for (int stateIndex = 0; stateIndex < STATE_LENGTH; stateIndex++) {
+            for (int curlStateIndex = 0; curlStateIndex < CURL_STATE_LENGTH; curlStateIndex++) {
 
-                final long alpha = scratchpadLow[scratchpadIndex];
-                final long beta = scratchpadHigh[scratchpadIndex];
-                final long gamma = scratchpadHigh[scratchpadIndex += (scratchpadIndex < 365 ? 364 : -365)];
-                final long delta = (alpha | (~gamma)) & (scratchpadLow[scratchpadIndex] ^ beta);
+                final long alpha = curlScratchpadLow[curlScratchpadIndex];
+                final long beta = curlScratchpadHigh[curlScratchpadIndex];
+                final long gamma = curlScratchpadHigh[curlScratchpadIndex += (curlScratchpadIndex < 365 ? 364 : -365)];
+                final long delta = (alpha | (~gamma)) & (curlScratchpadLow[curlScratchpadIndex] ^ beta);
 
-                stateLow[stateIndex] = ~delta;
-                stateHigh[stateIndex] = (alpha ^ gamma) | delta;
+                curlStateLow[curlStateIndex] = ~delta;
+                curlStateHigh[curlStateIndex] = (alpha ^ gamma) | delta;
             }
         }
     }
 
-    private static void increment(final long[] midStateCopyLow, final long[] midStateCopyHigh, final int fromIndex, final int toIndex) {
+    private static void increment(final long[] midCurlStateCopyLow, final long[] midCurlStateCopyHigh, final int fromIndex, final int toIndex) {
 
         for (int i = fromIndex; i < toIndex; i++) {
 
-            if (midStateCopyLow[i] == 0b0000000000000000000000000000000000000000000000000000000000000000L) {
+            if (midCurlStateCopyLow[i] == 0b0000000000000000000000000000000000000000000000000000000000000000L) {
 
-                midStateCopyLow[i] = 0b1111111111111111111111111111111111111111111111111111111111111111L;
-                midStateCopyHigh[i] = 0b0000000000000000000000000000000000000000000000000000000000000000L;
+                midCurlStateCopyLow[i] = 0b1111111111111111111111111111111111111111111111111111111111111111L;
+                midCurlStateCopyHigh[i] = 0b0000000000000000000000000000000000000000000000000000000000000000L;
 
             } else {
 
-                if (midStateCopyHigh[i] == 0b0000000000000000000000000000000000000000000000000000000000000000L) {
+                if (midCurlStateCopyHigh[i] == 0b0000000000000000000000000000000000000000000000000000000000000000L) {
 
-                    midStateCopyHigh[i] = 0b1111111111111111111111111111111111111111111111111111111111111111L;
+                    midCurlStateCopyHigh[i] = 0b1111111111111111111111111111111111111111111111111111111111111111L;
 
                 } else {
 
-                    midStateCopyLow[i] = 0b0000000000000000000000000000000000000000000000000000000000000000L;
+                    midCurlStateCopyLow[i] = 0b0000000000000000000000000000000000000000000000000000000000000000L;
                 }
 
                 break;
